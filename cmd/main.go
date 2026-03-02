@@ -24,7 +24,7 @@ func main() {
 	oktaClient := okta.NewClient(cfg.OktaToken)
 	webhookClient := storage.NewWebhookClient(cfg.WebhookURL)
 
-	// 3. Initialize Processor (Now passing StartDate)
+	// 3. Initialize Processor
 	proc := processor.NewProcessor(oktaClient, mongoStore, webhookClient, cfg.OktaDomain, cfg.BatchSize, cfg.StartDate)
 
 	// 4. Start Health Check Server (Non-blocking)
