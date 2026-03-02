@@ -1,8 +1,7 @@
 package models
 
-import "time"
-
-type State struct {
-	ID        string    `bson:"_id"`
-	LastSince time.Time `bson:"last_since"`
+// SyncState represents the last fetched cursor URL to prevent data loss or duplication.
+type SyncState struct {
+	ID      string `bson:"_id"`
+	NextURL string `bson:"next_url"`
 }

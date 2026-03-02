@@ -1,10 +1,9 @@
 package okta
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -13,124 +12,80 @@ import (
 )
 
 type Client struct {
-	http   *http.Client
-	domain string
-	token  string
-	limit  int
+	Token      string
+	HTTPClient *http.Client
 }
 
-func New(domain, token string, limit int) *Client {
+func NewClient(token string) *Client {
 	return &Client{
-		http:   &http.Client{Timeout: 30 * time.Second},
-		domain: domain,
-		token:  token,
-		limit:  limit,
+		Token: token,
+		HTTPClient: &http.Client{
+			Timeout: 15 * time.Second,
+		},
 	}
 }
 
-func (c *Client) FetchLogs(ctx context.Context, since time.Time) ([]models.LogEvent, time.Time, error) {
-	var all []models.LogEvent
-	maxPublished := since
-
-	url := fmt.Sprintf("https://%s/api/v1/logs?since=%s&limit=%d&sortOrder=ASCENDING",
-		c.domain,
-		since.Format(time.RFC3339Nano),
-		c.limit)
-
-	// slog.Info("fetching logs", "url", url)
-
-	for {
-		req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
-		req.Header.Set("Authorization", "SSWS "+c.token)
-		req.Header.Set("Accept", "application/json")
-
-		resp, err := c.http.Do(req)
-		slog.Info("fetching logs", "url", resp.Request.URL.String(), "status", resp.StatusCode)
-		if err != nil {
-			return nil, since, err
-		}
-
-		defer resp.Body.Close()
-
-		if resp.StatusCode == 429 {
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
-		if resp.StatusCode != 200 {
-			return nil, since, fmt.Errorf("okta error: %s", resp.Status)
-		}
-
-		var raw []map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-			return nil, since, err
-		}
-
-		if len(raw) == 0 {
-			break
-		}
-
-		links := strings.Split(resp.Header.Get("Link"), ",")
-		next := ""
-		for _, l := range links {
-			if strings.Contains(l, `rel="next"`) {
-				// Extract the URL between < and >
-				start := strings.Index(l, "<")
-				end := strings.Index(l, ">")
-				if start != -1 && end != -1 {
-					next = l[start+1 : end]
-					break
-				}
-			}
-		}
-		if strings.Contains(next, "after=") {
-			slog.Info("pagination detected, but skipping due to time-based polling")
-			return nil, since, fmt.Errorf("completed")
-		}
-
-		for _, r := range raw {
-			pubStr := r["published"].(string)
-			pub, _ := time.Parse(time.RFC3339Nano, pubStr)
-
-			ev := models.LogEvent{
-				UUID:      r["uuid"].(string),
-				Published: pub,
-				EventType: fmt.Sprint(r["eventType"]),
-				Severity:  fmt.Sprint(r["severity"]),
-				Raw:       r,
-			}
-
-			if pub.After(maxPublished) {
-				maxPublished = pub
-			}
-
-			all = append(all, ev)
-		}
-
-		nextURL := extractNextLink(resp.Header.Get("Link"))
-		if nextURL == "" {
-			break
-		}
-
-		url = nextURL
+func (c *Client) FetchLogs(url string) (*models.OktaResponse, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
 	}
 
-	return all, maxPublished, nil
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "SSWS "+c.Token)
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("okta API returned status: %s", resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	// Unmarshal into a map so we can access the Okta uuid directly
+	var rawLogs []map[string]interface{}
+	if err := json.Unmarshal(body, &rawLogs); err != nil {
+		return nil, err
+	}
+
+	var logs []models.LogEvent
+	for _, entry := range rawLogs {
+		// THIS IS THE MAGIC TRICK:
+		// We tell MongoDB to use Okta's 'uuid' as the main document _id.
+		// This mathematically guarantees 0 duplicates in your database.
+		if uuid, ok := entry["uuid"].(string); ok {
+			entry["_id"] = uuid
+		}
+		logs = append(logs, entry)
+	}
+
+	// Look through ALL headers Okta sent to find the "next" link
+	var nextURL string
+	for _, linkHeader := range resp.Header.Values("Link") {
+		parsed := parseNextLink(linkHeader)
+		if parsed != "" {
+			nextURL = parsed
+			break
+		}
+	}
+
+	return &models.OktaResponse{Logs: logs, NextURL: nextURL}, nil
 }
 
-func extractNextLink(linkHeader string) string {
-	if linkHeader == "" {
-		return ""
-	}
-
-	links := strings.Split(linkHeader, ",")
-	for _, l := range links {
-		if strings.Contains(l, `rel="next"`) {
-			// Extract the URL between < and >
-			start := strings.Index(l, "<")
-			end := strings.Index(l, ">")
-			if start != -1 && end != -1 {
-				return l[start+1 : end]
+func parseNextLink(headerValue string) string {
+	links := strings.Split(headerValue, ",")
+	for _, link := range links {
+		if strings.Contains(link, `rel="next"`) || strings.Contains(link, `rel=next`) {
+			parts := strings.Split(link, ";")
+			if len(parts) > 0 {
+				return strings.Trim(strings.TrimSpace(parts[0]), "<>")
 			}
 		}
 	}
