@@ -118,7 +118,6 @@ go test -tags=integration ./...
 
 ```
 
-
 4. Commit your changes and open a Pull Request.
 
 ## Authors and acknowledgment
