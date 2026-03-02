@@ -1,4 +1,3 @@
-# okta-ingestor
 
 # Okta System Logs Ingestor
 
@@ -8,18 +7,20 @@
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ## Description
-The **Okta System Logs Ingestor** is a robust, stateful Go service designed to continuously fetch System Logs from Okta via pagination, store them securely in MongoDB, and forward them to an external Webhook. It is built for high reliability in enterprise environments (such as SIEM/SOAR integrations), ensuring zero data loss and exactly-once processing.
+The **Okta System Logs Ingestor** is a robust, stateful Go service designed to continuously fetch System Logs from Okta via API pagination, store them securely in MongoDB, and forward them to an external Webhook. 
+
+Built specifically for reliable API integration with cybersecurity tools and SIEM/SOAR platforms, this service guarantees zero data loss, exact-once processing, and strict adherence to UTC timestamps for accurate security event correlation.
 
 **Key Features:**
-* **Stateful Pagination:** Tracks the latest `maxPublished` timestamp and cursor in MongoDB to resume exactly where it left off after a restart.
-* **Resilient Polling Loop:** Handles Okta API Rate Limiting (HTTP 429) with sleep/retry mechanisms.
-* **Zero Duplicates:** Uses a two-step deduplication process: in-memory UUID mapping for batch duplicates, and MongoDB `_id` mapping to silently ignore `11000` duplicate key errors.
-* **Webhook Retry Logic:** Implements an N-time retry mechanism for failed webhook deliveries.
-* **Graceful Shutdown:** Intercepts `SIGINT`/`SIGTERM` to safely cancel contexts, stop the scheduler, and close database connections without interrupting in-flight database transactions.
+* **Stateful Pagination:** Tracks the latest Okta cursor (`next_url`) in MongoDB to resume exactly where it left off after a restart or failure.
+* **Resilient Polling Loop:** Designed to handle Okta API Rate Limiting (HTTP 429) gracefully.
+* **Zero Duplicates:** Uses MongoDB `_id` mapping to the Okta log `uuid`, silently ignoring `11000` duplicate key errors.
+* **Webhook Forwarding:** Streams validated log batches in real-time to external endpoints.
+* **Graceful Shutdown & Health Checks:** Exposes a `/health` endpoint for orchestrators and safely finalizes database connections during `SIGINT`/`SIGTERM`.
 
 ## Visuals
 ### Architecture & Ingestion Flow
-*(Ensure your `sequence.png` file is placed in the root or `docs/` folder of your repository so it renders here)*
+Below is the system's execution flow, detailing the pagination loop, deduplication strategy, and webhook retry mechanisms.
 
 ![Okta System Logs Ingestion Flow](./out/sequence/sequence.png)
 
@@ -27,37 +28,33 @@ The **Okta System Logs Ingestor** is a robust, stateful Go service designed to c
 
 ### Requirements
 * **Go** (v1.19 or higher)
-* **MongoDB** (Running locally on port 27017, or a remote cluster)
-* **Okta API Token** (With `System Logs: Read` permissions)
+* **MongoDB** (Running locally on port `27017` or a remote cluster)
+* **Okta API Token** (Requires `System Logs: Read` permissions)
 
 ### Steps
-1. Clone the repository:
+1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/your-org/okta-ingestor.git](https://github.com/your-org/okta-ingestor.git)
+   git clone <your-repository-url>
    cd okta-ingestor
-
-
-```
+   ```
 
 2. **Download dependencies:**
-```bash
-go mod tidy
-
-```
+   ```bash
+   go mod tidy
+   ```
 
 
 3. **Configure the environment:**
 Open `internal/config/config.go` and update your target environment details. **Note: The `StartDate` must be in strict UTC format (Zulu time).**
-```go
-OktaDomain:   "[https://trial-5020092.okta.com](https://trial-5020092.okta.com)",
-OktaToken:    "YOUR_OKTA_API_TOKEN", 
-MongoURI:     "mongodb://localhost:27017",
-WebhookURL:   "[https://my-okta-logs.free.beeceptor.com](https://my-okta-logs.free.beeceptor.com)",
-PollInterval: 30 * time.Second,
-BatchSize:    100,
-StartDate:    "2026-02-01T00:00:00.000Z", 
-
-```
+   ```go
+   OktaDomain:   "[https://trial-5020092.okta.com](https://trial-5020092.okta.com)",
+   OktaToken:    "YOUR_OKTA_API_TOKEN", 
+   MongoURI:     "mongodb://localhost:27017",
+   WebhookURL:   "[https://my-okta-logs.free.beeceptor.com](https://my-okta-logs.free.beeceptor.com)",
+   PollInterval: 30 * time.Second,
+   BatchSize:    100,
+   StartDate:    "2026-02-01T00:00:00.000Z", 
+   ```
 
 
 
@@ -88,7 +85,6 @@ go run main.go
 ```bash
 curl http://localhost:8080/health
 # {"status": "ok"}
-
 ```
 
 ## Support
@@ -109,14 +105,15 @@ Contributions are welcome, especially those that improve the ingestor's resilien
 1. Fork the repository and create your feature branch.
 2. Ensure you write and pass **Unit Test Cases (UTCs)** for any new logic.
 3. Verify your changes maintain a high test coverage threshold:
-```bash
-# Run isolated Unit Tests
-go test -short ./...
+   ```bash
+   # Run isolated Unit Tests
+   go test -short ./...
 
-# Run Integration Tests (Requires local MongoDB instance)
-go test -tags=integration ./...
+   # Run Integration Tests (Requires local MongoDB instance)
+   go test -tags=integration ./...
 
-```
+   ```
+
 
 4. Commit your changes and open a Pull Request.
 
