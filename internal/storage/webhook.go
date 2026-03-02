@@ -2,43 +2,48 @@ package storage
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
 	"okta-ingestor/internal/models"
 )
 
-type WebhookSender struct {
-	client  *http.Client
-	url     string
-	method  string
-	retries int
+type WebhookClient struct {
+	URL        string
+	HTTPClient *http.Client
 }
 
-func NewWebhookSender(url, method string, timeout time.Duration, retries int) *WebhookSender {
-	return &WebhookSender{
-		client:  &http.Client{Timeout: timeout},
-		url:     url,
-		method:  method,
-		retries: retries,
+func NewWebhookClient(url string) *WebhookClient {
+	return &WebhookClient{
+		URL: url,
+		HTTPClient: &http.Client{
+			Timeout: 15 * time.Second,
+		},
 	}
 }
 
-func (w *WebhookSender) Send(ctx context.Context, logs []models.LogEvent) error {
-	body, _ := json.Marshal(logs)
-
-	for i := 0; i < w.retries; i++ {
-		req, _ := http.NewRequestWithContext(ctx, w.method, w.url, bytes.NewBuffer(body))
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := w.client.Do(req)
-		if err == nil && resp.StatusCode == 200 {
-			return nil
-		}
-		time.Sleep(time.Second)
+func (w *WebhookClient) Send(logs []models.LogEvent) error {
+	jsonData, err := json.Marshal(logs)
+	if err != nil {
+		return err
 	}
 
+	req, err := http.NewRequest("POST", w.URL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := w.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("webhook returned status: %s", resp.Status)
+	}
 	return nil
 }

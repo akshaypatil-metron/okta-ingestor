@@ -1,11 +1,10 @@
 package models
 
-import "time"
+// LogEvent represents a single Okta log entry.
+type LogEvent interface{}
 
-type LogEvent struct {
-	UUID      string    `bson:"uuid" json:"uuid"`
-	Published time.Time `bson:"published" json:"published"`
-	EventType string    `bson:"eventType" json:"eventType"`
-	Severity  string    `bson:"severity" json:"severity"`
-	Raw       any       `bson:"raw" json:"raw"`
+// OktaResponse holds the parsed logs and the pagination cursor.
+type OktaResponse struct {
+	Logs    []LogEvent
+	NextURL string
 }
