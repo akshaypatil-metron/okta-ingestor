@@ -110,7 +110,8 @@ Contributions are welcome, especially those that improve the ingestor's resilien
    go test -short ./...
 
    # Run Integration Tests (Requires local MongoDB instance)
-   go test -tags=integration ./...
+   go test -v -tags=integration -coverprofile coverage.out ./...
+   go tool cover -html coverage.out
 
    ```
 
