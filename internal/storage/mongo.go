@@ -26,7 +26,7 @@ func NewMongoStore(uri string) (*MongoStore, error) {
 		return nil, err
 	}
 
-	db := client.Database("okta_data")
+	db := client.Database("Okta_Data")
 	store := &MongoStore{
 		client:    client,
 		logColl:   db.Collection("system_logs"),
